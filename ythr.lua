@@ -1,3 +1,10 @@
+--[[
+ythr is an implementation of a cooperatively scheduled concurrent
+execution system. I'm implementing things to feel similar to go's
+system of goroutines and channels. It handles socket waits, channel
+sends and receives, and just general 'nice' thread yielding for 
+expensive processes to not block execution.
+--]]
 local pq = require("pq")
 local socket = require("socket")
 
@@ -45,11 +52,23 @@ function M.scheduler()
 			print("out of tasks!", numrecvwait, numsendwait)
 			if numrecvwait > 0 or numsendwait > 0 then
 				print("Uh oh! Channel deadlock!")
+				print("sends:")
+				for k,v in pairs(chansends) do
+					for a, b in pairs(v) do
+						print(debug.traceback(b))
+					end
+				end
+				print("recvs:")
+				for k,v in pairs(chanrecvs) do
+					for a, b in pairs(v) do
+						print(debug.traceback(b))
+					end
+				end
 			end
 			return
 		end
 		local cont, nstate = coroutine.resume(co)
-		--print("after resume", cont, nstate)
+		if not cont then print("coroutine exited:", nstate) end
 		if nstate ~= nil and cont then
 			if nstate.waiton == "sock-read" then
 				readsockets[nstate.socket] = co
@@ -91,7 +110,6 @@ function M.scheduler()
 				end
 
 				if not sent then
-					print("setting chanrecv")
 					local ochtab = chanrecvs[nstate.chan]
 					if ochtab == nil then
 						ochtab = {}
@@ -99,6 +117,28 @@ function M.scheduler()
 					end
 					table.insert(ochtab, co)
 					numrecvwait = numrecvwait + 1
+				end
+			elseif nstate.waiton == "chan-close" then
+				local rchtab = chanrecvs[nstate.chan]
+				local schtab = chansends[nstate.chan]
+
+				table.insert(routines, co)
+				if rchtab ~= nil then 
+					while 1 do
+						local co = table.remove(rchtab, 1)
+						if co == nil then break end
+
+						table.insert(routines, co)
+					end
+				end
+
+				if schtab ~= nil then
+					while 1 do
+						local co = table.remove(schtab, 1)
+						if co == nil then break end
+
+						table.insert(routines, co)
+					end
 				end
 			else
 				print("unknown scheduler waiton value: ", nstate.waiton)
@@ -174,6 +214,10 @@ end
 
 function Chan:send(val)
 	while 1 do
+		if self.closed then
+			print("ATTEMPTED TO SEND ON CLOSED CHANNEL")
+			return 
+		end
 		if self.hasVal then
 			coroutine.yield({
 				waiton = "chan-send",
@@ -193,6 +237,9 @@ end
 
 function Chan:recv()
 	while not self.hasVal do
+		if self.closed then
+			return nil, false
+		end
 		coroutine.yield({
 			waiton = "chan-recv",
 			chan = self,
@@ -202,7 +249,15 @@ function Chan:recv()
 	self.hasVal = false
 	local out = self.val
 	self.val = nil
-	return out
+	return out, true
+end
+
+function Chan:close()
+	self.closed = true
+	coroutine.yield({
+		waiton = "chan-close",
+		chan = self,
+	})
 end
 
 return M

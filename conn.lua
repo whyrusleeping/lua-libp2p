@@ -1,3 +1,9 @@
+--[[
+conn implements a buffered connection that uses either an underlying
+socket, or a ythr channel to read and write from. It correctly yields
+execution any time it would block.
+TODO: doesn't yield on blocking writes
+--]]
 local ythr = require("ythr")
 
 Conn = {}
@@ -26,7 +32,10 @@ function Conn:getData(num)
 	elseif self.ichan ~= nil then
 		local buf = ""
 		while buf:len() < num do
-			local data = self.ichan:recv()
+			local data, ok = self.ichan:recv()
+			if not ok then
+				return buf, nil
+			end
 			buf = buf .. data
 		end
 		return buf, nil
@@ -36,18 +45,14 @@ function Conn:getData(num)
 end
 
 function Conn:receive(num)
-	print("in receive: ", num)
 	if self.buf:len() >= num then
-		print("buf should cover it: ", self.buf:len())
 		local out = string.sub(self.buf, 1, num)
 		self.buf = string.sub(self.buf, num+1)
 		return out
 	end
 
-	print("receive data: ", num, self.buf:len())
 	local data, err = self:getData(num - self.buf:len())
 	if err then return nil, err end
-	print("got data: ", data:len())
 
 	local tmp = self.buf .. data
 	local out = string.sub(tmp, 1, num)
@@ -56,14 +61,11 @@ function Conn:receive(num)
 end
 
 function Conn:send(data)
-	print("CON SEND")
 	if self.con ~= nil then
 		return self.con:send(data)
 	else
-		print("CONN: send data via chan")
 		self.ochan:send(data)
-		print("CONN: sent data via chan")
-		return nil
+		return data:len(), nil
 	end
 end
 

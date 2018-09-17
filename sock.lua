@@ -1,113 +1,31 @@
+local switch = require("switch")
+local identify = require("identify")
 local multistream = require("multistream")
-local socket = require("socket")
-local varint = require("varint")
-local pq = require("pq")
 local ythr = require("ythr")
-local multiplex = require("multiplex")
-local conn = require("conn")
+local ping = require("ping")
 
+local sw = switch:new()
 
-function tryMultistream()
-	local tcp = assert(socket.tcp())
-	local host, port = "127.0.0.1", 4001
-	tcp:connect(host, port)
-
-	print("tcp = ", tcp)
-
-	local c = conn:new(tcp)
-
-	ptext = "/plaintext/1.0.0"
-
-	print("about to negotiate")
-	local val, err = multistream.negotiate(c, ptext)
-	print("after negotiate")
-	if err then
-		print(err)
-	else
-		print("val: ", val)
-	end
-
-	print("about to negotiate2")
-	local val, err = multistream.negotiate(c, "/mplex/6.7.0")
-	print("after negotiate2")
-	if err then
-		print(err)
-	else
-		print("val: ", val)
-	end
-
-	local protoOpts = {}
-	local mplex = multiplex:new(c, function (str)
-		print("New stream handler!")
-		local protoID, err = multistream.route(str, protoOpts)
-		if err then
-			print("failed to route stream negotiation", err)
-			return
-		end
-		print("route returned: ", protoID)
-	end)
-	print("new multiplex")
-end
-
-ythr.go(tryMultistream)
-
---[[
-local ch = ythr.makeChan()
-ythr.go(function ()
-	for i=1,20,1 do
-		ch:send(i)
-	end
-end)
+sw:setProtocolHandler(identify.protocolID, identify.handle)
 
 ythr.go(function ()
-	for i=100,80,-1 do
-		ch:send(i)
-	end
-end)
+	local mp, err = sw:dial("127.0.0.1", 4001)
+	if err then return err end
 
-ythr.go(function ()
-	for i=1,100,1 do
-		local val = ch:recv()
-		print(val)
-	end
-end)
-]]--
+	local s, err = mp:newStream()
+	if err then return err end
 
---[[
-ythr.go(function ()
-	for i=1,10,1 do
-		print(i)
-		ythr.polite()
-	end
-end)
+	local val, err = multistream.negotiate(s, "/ipfs/ping/1.0.0")
+	if err then return err end
+	print("negotiated", val)
 
-ythr.go(function ()
-	for i=1,10,1 do
-		print((i*4)+10)
-		ythr.polite()
-	end
+
+	ping.doPing(s)
+
 end)
 
 
-
-ythr.go(function ()
-	do return end
-	local buf = ""
-	while 1 do
-		local r, err = ythr.read(tcp, 5)
-		if err ~= nil then
-			if err == "closed" then
-				break
-			end
-			return
-		end
-		if r == "" then break end
-		print("read data: ", r)
-		buf = buf .. r
-	end
-	print("final read: ", buf)
-end)
-
+--[[ notes: how to listen on a server in lua
 function startServer()
 	print("START SERVER")
 	local server = assert(socket.bind("*", 0))

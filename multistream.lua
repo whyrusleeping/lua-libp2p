@@ -1,3 +1,6 @@
+--[[
+multistream implements multistream select negotiation
+--]]
 local varint = require("varint")
 
 local M = {}
@@ -61,13 +64,11 @@ function M.list(con)
 end
 
 function M.route(con, opts)
-	print("called route", con)
 	local num, err = M.lpWrite(con, M.ProtocolID)
 	if err then
 		print("multistream route write error:", err)
 		return err
 	end
-	print("after first lpwrite")
 	local header = assert(M.lpRead(con))
 	if (header ~= M.ProtocolID) then
 		print("got header: ", header)
@@ -79,12 +80,19 @@ function M.route(con, opts)
 		if err then return nil, err end
 
 		if opts[attempt] ~= nil then
-			assert(M.lpWrite(con, attempt))
+			local n, err = M.lpWrite(con, attempt)
+			if err then
+				print("WRITE ERROR: ", err)
+				return nil, err
+			end
 			return attempt, nil
 		end
-		print("unsupported protocol: ", attempt)
 
-		assert(M.lpWrite(con, "na"))
+		local n, err = M.lpWrite(con, "na")
+		if err then
+			print("ROUTE ERRORED ON WRITE: ", err)
+			return err
+		end
 	end
 end
 

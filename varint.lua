@@ -6,6 +6,9 @@ function M.readUvarint(r)
 	for i=0,10,1 do
 		local bs = assert(r:receive(1))
 		local b = string.byte(bs, 1)
+		if b == nil then
+			return nil, "failed to read"
+		end
 		if(b < 0x80) then
 			if (i > 9 or (i == 9 and b > 1)) then
 				return x, "overflow"
